@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.log
+erro_bot.txt
+.git/
+.github/
+.vscode/

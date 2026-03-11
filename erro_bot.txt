@@ -1,0 +1,27 @@
+Traceback (most recent call last):
+  File "C:\Users\joaoo\Desktop\VIEX\Circo VIEX\Bot-Zito\bot.py", line 82, in on_message
+    response = chat_session.send_message(prompt_enriquecido)
+  File "C:\Users\joaoo\Desktop\VIEX\Circo VIEX\Bot-Zito\gemini_logic.py", line 327, in send_message
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+    ...<2 lines>...
+        temperature=0.7,
+    )
+  File "C:\Users\joaoo\AppData\Local\Programs\Python\Python314\Lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\joaoo\AppData\Local\Programs\Python\Python314\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1192, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\joaoo\AppData\Local\Programs\Python\Python314\Lib\site-packages\openai\_base_client.py", line 1259, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\joaoo\AppData\Local\Programs\Python\Python314\Lib\site-packages\openai\_base_client.py", line 1047, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.BadRequestError: Error code: 400 - {'error': {'message': "An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. The following tool_call_ids did not have response messages: call_6LcFSSSGge74Po21nIVtdv85", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}

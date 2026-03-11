@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.dockerignore
+check_*.py
+test_*.py
+search_*.py
