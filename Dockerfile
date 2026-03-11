@@ -11,6 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Define o diretório de trabalho dentro do contêiner
 WORKDIR /app
 
+# Força a invalidação do cache do Docker abaixo desta linha
+ARG CACHEBUST=1
+
 # Copia e instala as dependências do Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
