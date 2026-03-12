@@ -5,8 +5,8 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Instala dependências nativas (se necessário por algum pacote Python)
-# RUN apt-get update && apt-get install -y gcc
+# Instala git (necessário para o anúncio de deploy automático)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Define o diretório de trabalho dentro do contêiner
 WORKDIR /app
