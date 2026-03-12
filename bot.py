@@ -34,6 +34,35 @@ async def on_ready():
     if not rotina_colisor_ideias.is_running():
         rotina_colisor_ideias.start()
 
+    # --- ANÚNCIO DE NOVO DEPLOY ---
+    try:
+        import subprocess
+        
+        # Pega o hash e a mensagem do último commit
+        git_hash = subprocess.check_output(['git', 'log', '-1', '--format=%H']).decode('utf-8').strip()
+        git_msg = subprocess.check_output(['git', 'log', '-1', '--format=%s']).decode('utf-8').strip()
+        
+        hash_file = "last_commit.txt"
+        last_hash = ""
+        if os.path.exists(hash_file):
+            with open(hash_file, "r") as f:
+                last_hash = f.read().strip()
+                
+        # Se o hash atual for diferente do salvo, significa que é um deploy novo!
+        if git_hash != last_hash:
+            canal_gestao_tarefas_id = 1479226481782554634
+            canal = bot.get_channel(canal_gestao_tarefas_id)
+            if canal:
+                mensagem_anuncio = f"🚀 **Zito Atualizado na VPS!** Acabei de nascer de novo com um pedaço novo de cérebro.\n**Novidade/Correção:** `{git_msg}`\n\n*(Deploy Automático Concluído - Hash: {git_hash[:7]})*"
+                await canal.send(mensagem_anuncio)
+                
+            # Salva o novo hash para não anunciar de novo se o bot só reiniciar
+            with open(hash_file, "w") as f:
+                f.write(git_hash)
+    except Exception as e:
+        print(f"Erro ao tentar ler o git log para anúncio: {e}")
+    # ------------------------------
+
 # Configura o horário de Brasília (UTC-3)
 hora_rotina = datetime.time(hour=19, minute=19, tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
 hora_espelho = datetime.time(hour=9, minute=9, tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
