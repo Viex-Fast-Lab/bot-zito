@@ -862,8 +862,13 @@ async def colisor_ideias(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
     await executar_colisor_ideias(interaction, interaction.guild)
 
-if __name__ == "__main__":
-    if not TOKEN or TOKEN == "YOUR_DISCORD_BOT_TOKEN_HERE":
+def main():
+    token = os.getenv("DISCORD_TOKEN") or TOKEN
+    if not token or token == "YOUR_DISCORD_BOT_TOKEN_HERE":
         print("AVISO: Adicione o DISCORD_TOKEN no arquivo .env para iniciar o bot.")
-    else:
-        bot.run(TOKEN)
+        return
+    bot.run(token)
+
+
+if __name__ == "__main__":
+    main()
