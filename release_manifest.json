@@ -1,0 +1,21 @@
+{
+  "sha": "6a9bd33",
+  "subject": "Fix: make deploy announce work without git repo",
+  "changes": [
+    "O anuncio de deploy agora funciona mesmo quando a VPS sobe a partir de um archive sem .git.",
+    "Os canais das rotinas passaram a usar fetch como fallback, reduzindo falsos \"canal nao encontrado\" por cache."
+  ],
+  "fixes": [
+    "Corrigido o erro de anuncio de deploy que dependia de git dentro do container.",
+    "Reduzido o risco de falha ao resolver canais do Discord apenas pelo cache local."
+  ],
+  "capabilities": [
+    "Anunciar novos deploys com mais estabilidade na VPS.",
+    "Executar rotinas automaticas usando resolucao de canal mais confiavel.",
+    "Manter memoria operacional e sincronizacoes sem depender do checkout git em producao."
+  ],
+  "changed_files": [
+    "bot.py",
+    ".env.example"
+  ]
+}

@@ -1,6 +1,7 @@
 import os
 import asyncio
 import subprocess
+import json
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
@@ -58,17 +59,31 @@ def _build_commit_range(last_hash: str, git_hash: str) -> str:
     return f"{last_hash}..{git_hash}" if last_hash else git_hash
 
 
+def _load_release_manifest():
+    manifest_path = "release_manifest.json"
+    if not os.path.exists(manifest_path):
+        return {}
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def _get_deploy_metadata():
+    manifest = _load_release_manifest()
     commit_sha = (
         os.getenv("DEPLOY_COMMIT_SHA")
         or os.getenv("EASYPANEL_GIT_COMMIT_SHA")
         or os.getenv("RAILWAY_GIT_COMMIT_SHA")
+        or manifest.get("sha", "")
         or ""
     ).strip()
     commit_subject = (
         os.getenv("DEPLOY_COMMIT_SUBJECT")
         or os.getenv("EASYPANEL_GIT_COMMIT_MESSAGE")
         or os.getenv("RAILWAY_GIT_COMMIT_MESSAGE")
+        or manifest.get("subject", "")
         or ""
     ).strip()
     changed_files_env = (
@@ -87,25 +102,34 @@ def _get_deploy_metadata():
             "sha": commit_sha,
             "subject": commit_subject,
             "changed_files": changed_files,
+            "changes": manifest.get("changes") or [],
+            "fixes": manifest.get("fixes") or [],
+            "capabilities": manifest.get("capabilities") or [],
             "source": "env",
         }
 
-    try:
+    if os.path.isdir(".git"):
         sha = _run_git_command(["git", "log", "-1", "--format=%H"])
         subject = _run_git_command(["git", "log", "-1", "--format=%s"])
         return {
             "sha": sha,
             "subject": subject,
             "changed_files": [],
+            "changes": [],
+            "fixes": [],
+            "capabilities": [],
             "source": "git",
         }
-    except Exception:
-        return {
-            "sha": "",
-            "subject": "",
-            "changed_files": [],
-            "source": "unknown",
-        }
+
+    return {
+        "sha": "",
+        "subject": "",
+        "changed_files": [],
+        "changes": manifest.get("changes") or [],
+        "fixes": manifest.get("fixes") or [],
+        "capabilities": manifest.get("capabilities") or [],
+        "source": "unknown",
+    }
 
 
 def _summarize_capabilities_from_files(changed_files):
@@ -132,6 +156,9 @@ def _build_deploy_announcement(last_hash: str, git_hash: str):
     changed_files = []
 
     metadata = _get_deploy_metadata()
+    changes = metadata.get("changes") or []
+    fixes = metadata.get("fixes") or []
+    capabilities = metadata.get("capabilities") or []
     if metadata["source"] == "git" and git_hash:
         commit_range = _build_commit_range(last_hash, git_hash)
         subjects_output = _run_git_command(["git", "log", "--format=%s", commit_range])
@@ -146,16 +173,22 @@ def _build_deploy_announcement(last_hash: str, git_hash: str):
             subjects = [metadata["subject"]]
         changed_files = metadata.get("changed_files") or []
 
-    fixes = []
-    changes = []
-    for subject in subjects[:8]:
-        lowered = subject.lower()
-        if lowered.startswith("fix") or "corrig" in lowered or "erro" in lowered or "bug" in lowered:
-            fixes.append(subject)
-        else:
-            changes.append(subject)
+    if not changes or not fixes:
+        derived_changes = []
+        derived_fixes = []
+        for subject in subjects[:8]:
+            lowered = subject.lower()
+            if lowered.startswith("fix") or "corrig" in lowered or "erro" in lowered or "bug" in lowered:
+                derived_fixes.append(subject)
+            else:
+                derived_changes.append(subject)
+        if not changes:
+            changes = derived_changes
+        if not fixes:
+            fixes = derived_fixes
 
-    capabilities = _summarize_capabilities_from_files(changed_files)
+    if not capabilities:
+        capabilities = _summarize_capabilities_from_files(changed_files)
 
     if not changes and subjects:
         changes = subjects[:3]
