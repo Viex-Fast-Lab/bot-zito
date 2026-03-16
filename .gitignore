@@ -1,8 +1,13 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
+*.db
+*.sqlite3
 .dockerignore
 check_*.py
 test_*.py
 search_gov.py
 search_script.py
+last_commit.txt

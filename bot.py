@@ -1,13 +1,22 @@
 import os
+import asyncio
+import subprocess
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 import github_client
 import datetime
 import time
+import memory_store
+import message_intelligence
+import fireflies_client
+import strategic_intelligence
+from notion_client import fetch_daily_notion_updates
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+GESTAO_TAREFAS_CHANNEL_ID = int(os.getenv("GESTAO_TAREFAS_CHANNEL_ID", "1479226481782554634"))
+DEPLOY_ANNOUNCE_CHANNEL_ID = int(os.getenv("DEPLOY_ANNOUNCE_CHANNEL_ID", "1479590009009995837"))
 
 # Configuração Anti-Flood
 USER_COOLDOWN = 10 # Segundos de espera entre mensagens para o mesmo usuário
@@ -18,14 +27,113 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+def _run_git_command(args):
+    return subprocess.check_output(args).decode("utf-8", errors="ignore").strip()
+
+
+def _load_last_deploy_hash(path: str) -> str:
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
+
+def _save_last_deploy_hash(path: str, git_hash: str):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(git_hash)
+
+
+def _build_commit_range(last_hash: str, git_hash: str) -> str:
+    return f"{last_hash}..{git_hash}" if last_hash else git_hash
+
+
+def _summarize_capabilities_from_files(changed_files):
+    capability_map = {
+        "bot.py": "automatizar melhor comportamentos e rotinas no Discord",
+        "memory_store.py": "guardar memoria persistente de mensagens, analises e reunioes",
+        "message_intelligence.py": "avaliar clareza e apoiar discretamente a comunicacao do Rafa",
+        "fireflies_client.py": "ler reunioes do Fireflies e transformar em contexto operacional",
+        "strategic_intelligence.py": "sugerir agentes e automacoes com visao estrategica",
+        "notion_client.py": "cruzar contexto com o Notion e apoiar criacao de tarefas",
+        "search_github.py": "operar tarefas e sprints vindas do GitHub",
+        "gemini_logic.py": "usar contexto e ferramentas com mais inteligencia operacional",
+    }
+    capabilities = []
+    for path in changed_files:
+        item = capability_map.get(path.strip())
+        if item:
+            capabilities.append(item)
+    return list(dict.fromkeys(capabilities))
+
+
+def _build_deploy_announcement(last_hash: str, git_hash: str):
+    commit_range = _build_commit_range(last_hash, git_hash)
+    subjects_output = _run_git_command(["git", "log", "--format=%s", commit_range])
+    if last_hash:
+        changed_files_output = _run_git_command(["git", "diff", "--name-only", commit_range])
+    else:
+        changed_files_output = _run_git_command(["git", "show", "--pretty=", "--name-only", git_hash])
+
+    subjects = [line.strip() for line in subjects_output.splitlines() if line.strip()]
+    changed_files = [line.strip() for line in changed_files_output.splitlines() if line.strip()]
+
+    fixes = []
+    changes = []
+    for subject in subjects[:8]:
+        lowered = subject.lower()
+        if lowered.startswith("fix") or "corrig" in lowered or "erro" in lowered or "bug" in lowered:
+            fixes.append(subject)
+        else:
+            changes.append(subject)
+
+    capabilities = _summarize_capabilities_from_files(changed_files)
+
+    if not changes and subjects:
+        changes = subjects[:3]
+    if not fixes:
+        fixes = ["Sem correcoes explicitas registradas neste deploy."]
+    if not capabilities:
+        capabilities = ["evoluir comportamentos e rotinas operacionais ja existentes"]
+
+    return "\n".join(
+        [
+            "Deploy do Zito concluido.",
+            "",
+            "**O que mudou**",
+            *[f"- {item}" for item in changes[:4]],
+            "",
+            "**Erros corrigidos**",
+            *[f"- {item}" for item in fixes[:4]],
+            "",
+            "**Agora estou apto a fazer melhor**",
+            *[f"- {item}" for item in capabilities[:5]],
+            "",
+            f"Hash: `{git_hash[:7]}`",
+        ]
+    )[:1900]
+
 @bot.event
 async def on_ready():
     print(f'Bot {bot.user} conectado com sucesso!')
+    memory_store.init_db()
     try:
         synced = await bot.tree.sync()
         print(f"Sincronizado {len(synced)} comando(s) slash.")
     except Exception as e:
         print(e)
+
+    try:
+        deploy_hash_file = "last_commit.txt"
+        deploy_git_hash = _run_git_command(["git", "log", "-1", "--format=%H"])
+        deploy_last_hash = _load_last_deploy_hash(deploy_hash_file)
+        if deploy_git_hash != deploy_last_hash:
+            deploy_channel = bot.get_channel(DEPLOY_ANNOUNCE_CHANNEL_ID)
+            if deploy_channel:
+                await deploy_channel.send(_build_deploy_announcement(deploy_last_hash, deploy_git_hash))
+            _save_last_deploy_hash(deploy_hash_file, deploy_git_hash)
+    except Exception as e:
+        print(f"Erro ao tentar gerar anuncio de deploy: {e}")
     
     if not lembrete_fim_de_dia.is_running():
         lembrete_fim_de_dia.start()
@@ -33,6 +141,12 @@ async def on_ready():
         rotina_espelho_cultural.start()
     if not rotina_colisor_ideias.is_running():
         rotina_colisor_ideias.start()
+    if not sincronizar_historico_discord.is_running():
+        sincronizar_historico_discord.start()
+    if fireflies_client.is_configured() and not sincronizar_reunioes_fireflies.is_running():
+        sincronizar_reunioes_fireflies.start()
+    if not rotina_agentes_estrategicos.is_running():
+        rotina_agentes_estrategicos.start()
 
     # --- ANÚNCIO DE NOVO DEPLOY ---
     try:
@@ -49,7 +163,7 @@ async def on_ready():
                 last_hash = f.read().strip()
                 
         # Se o hash atual for diferente do salvo, significa que é um deploy novo!
-        if git_hash != last_hash:
+        if False and git_hash != last_hash:
             canal_gestao_tarefas_id = 1479226481782554634
             canal = bot.get_channel(canal_gestao_tarefas_id)
             if canal:
@@ -67,11 +181,12 @@ async def on_ready():
 hora_rotina = datetime.time(hour=19, minute=19, tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
 hora_espelho = datetime.time(hour=9, minute=9, tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
 hora_colisor = datetime.time(hour=11, minute=11, tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
+hora_agentes = datetime.time(hour=10, minute=10, tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
 
 @tasks.loop(time=hora_rotina)
 async def lembrete_fim_de_dia():
-    canal_gestao_tarefas_id = 1479226481782554634
-    canal = bot.get_channel(canal_gestao_tarefas_id)
+    canal_gestao_tarefas_id = GESTAO_TAREFAS_CHANNEL_ID
+    canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
     
     if canal:
         guild = canal.guild
@@ -83,8 +198,7 @@ async def lembrete_fim_de_dia():
 async def rotina_espelho_cultural():
     agora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-3)))
     if agora.weekday() == 1: # 1 = Terça-feira
-        canal_gestao_tarefas_id = 1479226481782554634
-        canal = bot.get_channel(canal_gestao_tarefas_id)
+        canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
         if canal:
             await executar_espelho_cultural(canal, canal.guild)
 
@@ -92,10 +206,167 @@ async def rotina_espelho_cultural():
 async def rotina_colisor_ideias():
     agora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-3)))
     if agora.weekday() == 3: # 3 = Quinta-feira
-        canal_gestao_tarefas_id = 1479226481782554634
-        canal = bot.get_channel(canal_gestao_tarefas_id)
+        canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
         if canal:
             await executar_colisor_ideias(canal, canal.guild)
+
+
+@tasks.loop(minutes=30)
+async def sincronizar_reunioes_fireflies():
+    await bot.wait_until_ready()
+    try:
+        meetings = await asyncio.to_thread(fireflies_client.list_recent_transcripts, 12)
+    except Exception as e:
+        print(f"Erro ao buscar reuniões no Fireflies: {e}")
+        return
+
+    latest_meeting_date = None
+    for raw_meeting in meetings:
+        try:
+            normalized = fireflies_client.normalize_transcript(raw_meeting)
+            transcript_id = normalized["transcript_id"]
+            if not transcript_id:
+                continue
+            memory_store.upsert_meeting(**normalized)
+            latest_meeting_date = normalized.get("date_iso") or latest_meeting_date
+        except Exception as e:
+            print(f"Erro ao normalizar reunião Fireflies: {e}")
+
+    memory_store.update_meeting_sync_state(
+        source="fireflies",
+        last_meeting_date_iso=latest_meeting_date,
+    )
+
+    canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
+    if not canal:
+        return
+
+    for meeting in reversed(memory_store.get_unannounced_meetings(limit=8)):
+        try:
+            announcement = strategic_intelligence.build_post_meeting_message(meeting)
+            await canal.send(announcement)
+            memory_store.mark_meeting_announced(meeting["transcript_id"])
+        except Exception as e:
+            print(f"Erro ao anunciar reunião {meeting.get('transcript_id')}: {e}")
+
+
+@tasks.loop(time=hora_agentes)
+async def rotina_agentes_estrategicos():
+    agora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-3)))
+    if agora.weekday() != 0:  # Segunda-feira
+        return
+
+    canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
+    if not canal:
+        return
+
+    discord_messages = memory_store.get_recent_discord_messages(days=7, limit=250)
+    meetings = memory_store.get_recent_meetings(days=7, limit=20)
+    notion_updates = fetch_daily_notion_updates()
+
+    if not discord_messages and not meetings:
+        return
+
+    try:
+        import gemini_logic
+
+        report = await asyncio.to_thread(
+            strategic_intelligence.generate_weekly_agent_report,
+            gemini_logic.client,
+            discord_messages,
+            meetings,
+            notion_updates,
+        )
+        if report:
+            for i in range(0, len(report), 1900):
+                await canal.send(report[i:i+1900])
+            memory_store.mark_meetings_reviewed([meeting["transcript_id"] for meeting in meetings])
+    except Exception as e:
+        print(f"Erro ao gerar relatório semanal de agentes: {e}")
+
+
+@tasks.loop(count=1)
+async def sincronizar_historico_discord():
+    """Backfill incremental de todo o histórico acessível do Discord para memória local."""
+    await bot.wait_until_ready()
+    for guild in bot.guilds:
+        for canal in guild.text_channels:
+            try:
+                state = memory_store.get_channel_sync_state(str(canal.id))
+                after = None
+                if state and state.get("last_message_created_at"):
+                    after = datetime.datetime.fromisoformat(state["last_message_created_at"])
+
+                last_message_id = state.get("last_message_id") if state else None
+                last_created_at = after
+
+                history_args = {"limit": None, "oldest_first": True}
+                if after:
+                    history_args["after"] = after
+
+                async for msg in canal.history(**history_args):
+                    is_rafa = message_intelligence.is_rafa_member(msg.author)
+                    memory_store.store_discord_message(msg, source="backfill", is_rafa=is_rafa)
+
+                    if is_rafa and msg.content.strip():
+                        analysis = message_intelligence.heuristic_classify_message(msg.content)
+                        memory_store.store_message_analysis(str(msg.id), str(msg.author.id), analysis)
+
+                    last_message_id = str(msg.id)
+                    last_created_at = msg.created_at
+
+                memory_store.update_channel_sync_state(
+                    channel_id=str(canal.id),
+                    guild_id=str(guild.id),
+                    channel_name=canal.name,
+                    last_message_id=last_message_id,
+                    last_message_created_at=last_created_at,
+                )
+                print(f"Histórico sincronizado: #{canal.name}")
+            except discord.errors.Forbidden:
+                print(f"Sem acesso ao canal #{canal.name}; pulando.")
+            except Exception as e:
+                print(f"Erro ao sincronizar #{canal.name}: {e}")
+
+
+async def processar_modo_sombra_rafa(message: discord.Message):
+    if not message.content.strip():
+        return
+
+    recent_context = memory_store.get_recent_channel_context(str(message.channel.id), limit=10)
+
+    try:
+        import gemini_logic
+
+        analysis = await asyncio.to_thread(
+            message_intelligence.classify_message,
+            gemini_logic.client,
+            message.author.display_name,
+            message.content,
+            recent_context,
+        )
+    except Exception:
+        analysis = message_intelligence.heuristic_classify_message(message.content)
+
+    memory_store.store_message_analysis(str(message.id), str(message.author.id), analysis)
+
+    recent_analyses = memory_store.get_recent_user_analyses(str(message.channel.id), str(message.author.id), limit=5)
+    last_intervention = memory_store.get_last_intervention(str(message.channel.id), str(message.author.id))
+
+    if not message_intelligence.should_intervene(analysis, recent_analyses, last_intervention):
+        return
+
+    intervention_text = message_intelligence.build_passive_intervention(analysis)
+    if not intervention_text:
+        return
+
+    await message.reply(intervention_text, mention_author=False)
+    memory_store.record_intervention(
+        channel_id=str(message.channel.id),
+        user_id=str(message.author.id),
+        trigger_message_id=str(message.id),
+        intervention_text=intervention_text,
+    )
 
 async def executar_rotina_resumo(destino, guild):
     """Executa a rotina ácida de resumo analisando todos os canais visíveis."""
@@ -182,13 +453,36 @@ async def on_message(message: discord.Message):
     clean_author = str(message.author).encode('ascii', 'ignore').decode()
     clean_msg = message.content.encode('ascii', 'ignore').decode()
     print(f"LOG MESSAGE: {clean_msg} FROM: {clean_author}")
+
+    is_rafa = message_intelligence.is_rafa_member(message.author)
+    memory_store.store_discord_message(message, source="live", is_rafa=is_rafa)
+    memory_store.update_channel_sync_state(
+        channel_id=str(message.channel.id),
+        guild_id=str(message.guild.id) if message.guild else "",
+        channel_name=getattr(message.channel, "name", ""),
+        last_message_id=str(message.id),
+        last_message_created_at=message.created_at,
+    )
+
     # Ignore messages from the bot itself
     if message.author == bot.user:
         return
 
     # Process AI interaction if the bot is mentioned (user or role)
     bot_mention = f"<@{bot.user.id}>"
-    if bot.user in message.mentions or bot_mention in message.content or any(role.name.lower() == "zito" for role in message.role_mentions):
+    was_directly_called = (
+        bot.user in message.mentions
+        or bot_mention in message.content
+        or any(role.name.lower() == "zito" for role in message.role_mentions)
+    )
+
+    if is_rafa and not was_directly_called:
+        try:
+            await processar_modo_sombra_rafa(message)
+        except Exception as e:
+            print(f"Erro no modo sombra do Rafa: {e}")
+
+    if was_directly_called:
         
         # --- VERIFICAÇÃO ANTI-FLOOD ---
         author_id = message.author.id
@@ -219,7 +513,10 @@ async def on_message(message: discord.Message):
             try:
                 import gemini_logic
                 # Use channel id or thread id for session persistence to keep context
-                session_id = str(message.channel.id) 
+                if is_rafa:
+                    session_id = f"rafa:{message.author.id}"
+                else:
+                    session_id = str(message.channel.id)
                 
                 chat_session = gemini_logic.get_chat_session(session_id)
                 prompt_enriquecido = f"[Mensagem de: {message.author.display_name}] {clean_prompt}"
