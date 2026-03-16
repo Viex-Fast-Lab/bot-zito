@@ -32,6 +32,16 @@ def _run_git_command(args):
     return subprocess.check_output(args).decode("utf-8", errors="ignore").strip()
 
 
+async def _resolve_channel(channel_id: int):
+    channel = bot.get_channel(channel_id)
+    if channel:
+        return channel
+    try:
+        return await bot.fetch_channel(channel_id)
+    except Exception:
+        return None
+
+
 def _load_last_deploy_hash(path: str) -> str:
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -46,6 +56,56 @@ def _save_last_deploy_hash(path: str, git_hash: str):
 
 def _build_commit_range(last_hash: str, git_hash: str) -> str:
     return f"{last_hash}..{git_hash}" if last_hash else git_hash
+
+
+def _get_deploy_metadata():
+    commit_sha = (
+        os.getenv("DEPLOY_COMMIT_SHA")
+        or os.getenv("EASYPANEL_GIT_COMMIT_SHA")
+        or os.getenv("RAILWAY_GIT_COMMIT_SHA")
+        or ""
+    ).strip()
+    commit_subject = (
+        os.getenv("DEPLOY_COMMIT_SUBJECT")
+        or os.getenv("EASYPANEL_GIT_COMMIT_MESSAGE")
+        or os.getenv("RAILWAY_GIT_COMMIT_MESSAGE")
+        or ""
+    ).strip()
+    changed_files_env = (
+        os.getenv("DEPLOY_CHANGED_FILES")
+        or os.getenv("EASYPANEL_GIT_CHANGED_FILES")
+        or ""
+    ).strip()
+
+    if changed_files_env:
+        changed_files = [item.strip() for item in changed_files_env.split(",") if item.strip()]
+    else:
+        changed_files = []
+
+    if commit_sha:
+        return {
+            "sha": commit_sha,
+            "subject": commit_subject,
+            "changed_files": changed_files,
+            "source": "env",
+        }
+
+    try:
+        sha = _run_git_command(["git", "log", "-1", "--format=%H"])
+        subject = _run_git_command(["git", "log", "-1", "--format=%s"])
+        return {
+            "sha": sha,
+            "subject": subject,
+            "changed_files": [],
+            "source": "git",
+        }
+    except Exception:
+        return {
+            "sha": "",
+            "subject": "",
+            "changed_files": [],
+            "source": "unknown",
+        }
 
 
 def _summarize_capabilities_from_files(changed_files):
@@ -68,15 +128,23 @@ def _summarize_capabilities_from_files(changed_files):
 
 
 def _build_deploy_announcement(last_hash: str, git_hash: str):
-    commit_range = _build_commit_range(last_hash, git_hash)
-    subjects_output = _run_git_command(["git", "log", "--format=%s", commit_range])
-    if last_hash:
-        changed_files_output = _run_git_command(["git", "diff", "--name-only", commit_range])
-    else:
-        changed_files_output = _run_git_command(["git", "show", "--pretty=", "--name-only", git_hash])
+    subjects = []
+    changed_files = []
 
-    subjects = [line.strip() for line in subjects_output.splitlines() if line.strip()]
-    changed_files = [line.strip() for line in changed_files_output.splitlines() if line.strip()]
+    metadata = _get_deploy_metadata()
+    if metadata["source"] == "git" and git_hash:
+        commit_range = _build_commit_range(last_hash, git_hash)
+        subjects_output = _run_git_command(["git", "log", "--format=%s", commit_range])
+        if last_hash:
+            changed_files_output = _run_git_command(["git", "diff", "--name-only", commit_range])
+        else:
+            changed_files_output = _run_git_command(["git", "show", "--pretty=", "--name-only", git_hash])
+        subjects = [line.strip() for line in subjects_output.splitlines() if line.strip()]
+        changed_files = [line.strip() for line in changed_files_output.splitlines() if line.strip()]
+    else:
+        if metadata.get("subject"):
+            subjects = [metadata["subject"]]
+        changed_files = metadata.get("changed_files") or []
 
     fixes = []
     changes = []
@@ -91,10 +159,15 @@ def _build_deploy_announcement(last_hash: str, git_hash: str):
 
     if not changes and subjects:
         changes = subjects[:3]
+    if not changes:
+        changes = ["Nova versao publicada na VPS com atualizacoes internas do Zito."]
     if not fixes:
         fixes = ["Sem correcoes explicitas registradas neste deploy."]
     if not capabilities:
-        capabilities = ["evoluir comportamentos e rotinas operacionais ja existentes"]
+        capabilities = [
+            "evoluir comportamentos e rotinas operacionais ja existentes",
+            "rodar rotinas automaticas e memoria operacional com mais estabilidade",
+        ]
 
     return "\n".join(
         [
@@ -109,7 +182,7 @@ def _build_deploy_announcement(last_hash: str, git_hash: str):
             "**Agora estou apto a fazer melhor**",
             *[f"- {item}" for item in capabilities[:5]],
             "",
-            f"Hash: `{git_hash[:7]}`",
+            f"Hash: `{(git_hash or metadata.get('sha') or 'desconhecido')[:7]}`",
         ]
     )[:1900]
 
@@ -125,10 +198,11 @@ async def on_ready():
 
     try:
         deploy_hash_file = "last_commit.txt"
-        deploy_git_hash = _run_git_command(["git", "log", "-1", "--format=%H"])
+        deploy_metadata = _get_deploy_metadata()
+        deploy_git_hash = deploy_metadata.get("sha") or "runtime"
         deploy_last_hash = _load_last_deploy_hash(deploy_hash_file)
         if deploy_git_hash != deploy_last_hash:
-            deploy_channel = bot.get_channel(DEPLOY_ANNOUNCE_CHANNEL_ID)
+            deploy_channel = await _resolve_channel(DEPLOY_ANNOUNCE_CHANNEL_ID)
             if deploy_channel:
                 await deploy_channel.send(_build_deploy_announcement(deploy_last_hash, deploy_git_hash))
             _save_last_deploy_hash(deploy_hash_file, deploy_git_hash)
@@ -153,8 +227,8 @@ async def on_ready():
         import subprocess
         
         # Pega o hash e a mensagem do último commit
-        git_hash = subprocess.check_output(['git', 'log', '-1', '--format=%H']).decode('utf-8').strip()
-        git_msg = subprocess.check_output(['git', 'log', '-1', '--format=%s']).decode('utf-8').strip()
+        git_hash = ""
+        git_msg = ""
         
         hash_file = "last_commit.txt"
         last_hash = ""
@@ -186,7 +260,7 @@ hora_agentes = datetime.time(hour=10, minute=10, tzinfo=datetime.timezone(dateti
 @tasks.loop(time=hora_rotina)
 async def lembrete_fim_de_dia():
     canal_gestao_tarefas_id = GESTAO_TAREFAS_CHANNEL_ID
-    canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
+    canal = await _resolve_channel(GESTAO_TAREFAS_CHANNEL_ID)
     
     if canal:
         guild = canal.guild
@@ -198,7 +272,7 @@ async def lembrete_fim_de_dia():
 async def rotina_espelho_cultural():
     agora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-3)))
     if agora.weekday() == 1: # 1 = Terça-feira
-        canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
+        canal = await _resolve_channel(GESTAO_TAREFAS_CHANNEL_ID)
         if canal:
             await executar_espelho_cultural(canal, canal.guild)
 
@@ -206,7 +280,7 @@ async def rotina_espelho_cultural():
 async def rotina_colisor_ideias():
     agora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-3)))
     if agora.weekday() == 3: # 3 = Quinta-feira
-        canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
+        canal = await _resolve_channel(GESTAO_TAREFAS_CHANNEL_ID)
         if canal:
             await executar_colisor_ideias(canal, canal.guild)
 
@@ -237,7 +311,7 @@ async def sincronizar_reunioes_fireflies():
         last_meeting_date_iso=latest_meeting_date,
     )
 
-    canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
+    canal = await _resolve_channel(GESTAO_TAREFAS_CHANNEL_ID)
     if not canal:
         return
 
@@ -256,7 +330,7 @@ async def rotina_agentes_estrategicos():
     if agora.weekday() != 0:  # Segunda-feira
         return
 
-    canal = bot.get_channel(GESTAO_TAREFAS_CHANNEL_ID)
+    canal = await _resolve_channel(GESTAO_TAREFAS_CHANNEL_ID)
     if not canal:
         return
 
