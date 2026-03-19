@@ -22,11 +22,8 @@ def init_db():
                 user_id TEXT PRIMARY KEY,
                 display_name TEXT,
                 username TEXT,
-                is_rafa INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
-                low_clarity_count INTEGER DEFAULT 0,
-                last_seen_at TEXT,
-                last_intervention_at TEXT
+                last_seen_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS discord_messages (
@@ -44,31 +41,6 @@ def init_db():
                 attachments_json TEXT,
                 is_bot INTEGER DEFAULT 0,
                 source TEXT DEFAULT 'live'
-            );
-
-            CREATE TABLE IF NOT EXISTS message_analysis (
-                message_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                intent TEXT,
-                clarity_score INTEGER,
-                actionability_score INTEGER,
-                needs_intervention INTEGER DEFAULT 0,
-                accentuation_issue INTEGER DEFAULT 0,
-                team_context_missing INTEGER DEFAULT 0,
-                suggested_rewrite TEXT,
-                assistant_intervention TEXT,
-                profile_signals_json TEXT,
-                rationale TEXT,
-                created_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS interventions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel_id TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                trigger_message_id TEXT,
-                intervention_text TEXT,
-                created_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS sync_state (
@@ -110,9 +82,6 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_messages_author_created
             ON discord_messages(author_id, created_at);
 
-            CREATE INDEX IF NOT EXISTS idx_analysis_user_created
-            ON message_analysis(user_id, created_at);
-
             CREATE INDEX IF NOT EXISTS idx_meetings_date
             ON meetings(date_iso);
             """
@@ -138,20 +107,19 @@ def _json_dump(value):
     return json.dumps(value or [], ensure_ascii=False)
 
 
-def upsert_user_profile(user_id: str, display_name: str, username: str, is_rafa: bool):
+def upsert_user_profile(user_id: str, display_name: str, username: str):
     with closing(_get_connection()) as conn:
         conn.execute(
             """
             INSERT INTO user_profiles (
-                user_id, display_name, username, is_rafa, message_count, last_seen_at
-            ) VALUES (?, ?, ?, ?, 0, ?)
+                user_id, display_name, username, message_count, last_seen_at
+            ) VALUES (?, ?, ?, 0, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 display_name=excluded.display_name,
                 username=excluded.username,
-                is_rafa=MAX(user_profiles.is_rafa, excluded.is_rafa),
                 last_seen_at=excluded.last_seen_at
             """,
-            (user_id, display_name, username, 1 if is_rafa else 0, _utc_now()),
+            (user_id, display_name, username, _utc_now()),
         )
         conn.commit()
 
@@ -170,7 +138,7 @@ def increment_user_message_count(user_id: str):
         conn.commit()
 
 
-def store_discord_message(message, source: str = "live", is_rafa: bool = False):
+def store_discord_message(message, source: str = "live"):
     mentions = [getattr(user, "display_name", str(user)) for user in message.mentions]
     attachments = [attachment.url for attachment in getattr(message, "attachments", [])]
     reference_id = None
@@ -181,7 +149,6 @@ def store_discord_message(message, source: str = "live", is_rafa: bool = False):
         user_id=str(message.author.id),
         display_name=message.author.display_name,
         username=getattr(message.author, "name", message.author.display_name),
-        is_rafa=is_rafa,
     )
 
     with closing(_get_connection()) as conn:
@@ -215,47 +182,6 @@ def store_discord_message(message, source: str = "live", is_rafa: bool = False):
     if cursor.rowcount:
         increment_user_message_count(str(message.author.id))
 
-
-def store_message_analysis(message_id: str, user_id: str, analysis: dict):
-    clarity_score = int(analysis.get("clarity_score") or 0)
-    with closing(_get_connection()) as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO message_analysis (
-                message_id, user_id, intent, clarity_score, actionability_score,
-                needs_intervention, accentuation_issue, team_context_missing,
-                suggested_rewrite, assistant_intervention, profile_signals_json,
-                rationale, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                message_id,
-                user_id,
-                analysis.get("intent", "outro"),
-                clarity_score,
-                int(analysis.get("actionability_score") or 0),
-                1 if analysis.get("needs_intervention") else 0,
-                1 if analysis.get("accentuation_issue") else 0,
-                1 if analysis.get("team_context_missing") else 0,
-                analysis.get("suggested_rewrite", ""),
-                analysis.get("assistant_intervention", ""),
-                _json_dump(analysis.get("profile_signals") or []),
-                analysis.get("rationale", ""),
-                _utc_now(),
-            ),
-        )
-        if clarity_score and clarity_score <= 2:
-            conn.execute(
-                """
-                UPDATE user_profiles
-                SET low_clarity_count = low_clarity_count + 1
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            )
-        conn.commit()
-
-
 def get_recent_channel_context(channel_id: str, limit: int = 12):
     with closing(_get_connection()) as conn:
         rows = conn.execute(
@@ -287,60 +213,6 @@ def get_recent_discord_messages(days: int = 7, limit: int = 300):
             (f"-{days} days", limit),
         ).fetchall()
     return [dict(row) for row in rows]
-
-
-def get_recent_user_analyses(channel_id: str, user_id: str, limit: int = 6):
-    with closing(_get_connection()) as conn:
-        rows = conn.execute(
-            """
-            SELECT a.*, m.channel_id, m.content
-            FROM message_analysis a
-            JOIN discord_messages m ON m.message_id = a.message_id
-            WHERE m.channel_id = ? AND a.user_id = ?
-            ORDER BY datetime(a.created_at) DESC
-            LIMIT ?
-            """,
-            (channel_id, user_id, limit),
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def get_last_intervention(channel_id: str, user_id: str):
-    with closing(_get_connection()) as conn:
-        row = conn.execute(
-            """
-            SELECT created_at, intervention_text
-            FROM interventions
-            WHERE channel_id = ? AND user_id = ?
-            ORDER BY datetime(created_at) DESC
-            LIMIT 1
-            """,
-            (channel_id, user_id),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def record_intervention(channel_id: str, user_id: str, trigger_message_id: str, intervention_text: str):
-    now = _utc_now()
-    with closing(_get_connection()) as conn:
-        conn.execute(
-            """
-            INSERT INTO interventions (
-                channel_id, user_id, trigger_message_id, intervention_text, created_at
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (channel_id, user_id, trigger_message_id, intervention_text, now),
-        )
-        conn.execute(
-            """
-            UPDATE user_profiles
-            SET last_intervention_at = ?
-            WHERE user_id = ?
-            """,
-            (now, user_id),
-        )
-        conn.commit()
-
 
 def get_channel_sync_state(channel_id: str):
     with closing(_get_connection()) as conn:

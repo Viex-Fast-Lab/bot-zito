@@ -1,21 +1,28 @@
 {
-  "sha": "6a9bd33",
-  "subject": "Fix: make deploy announce work without git repo",
+  "sha": "",
+  "subject": "Refactor bot runtime and stabilize async handlers",
   "changes": [
-    "O anuncio de deploy agora funciona mesmo quando a VPS sobe a partir de um archive sem .git.",
-    "Os canais das rotinas passaram a usar fetch como fallback, reduzindo falsos \"canal nao encontrado\" por cache."
+    "O fluxo principal do bot foi modularizado com handlers para runtime, roteamento, ingestao de eventos e conversas.",
+    "As respostas por mencao e as rotinas principais passaram a rodar chamadas de IA fora do loop principal do Discord."
   ],
   "fixes": [
-    "Corrigido o erro de anuncio de deploy que dependia de git dentro do container.",
-    "Reduzido o risco de falha ao resolver canais do Discord apenas pelo cache local."
+    "Corrigido o anuncio de deploy para nao reaproveitar texto antigo do release manifest em deploys mais novos.",
+    "Reduzido o risco de heartbeat bloqueado quando a IA demora a responder no Discord."
   ],
   "capabilities": [
-    "Anunciar novos deploys com mais estabilidade na VPS.",
-    "Executar rotinas automaticas usando resolucao de canal mais confiavel.",
-    "Manter memoria operacional e sincronizacoes sem depender do checkout git em producao."
+    "Responder por mencao com um handler mais estavel e menos acoplado ao bot principal.",
+    "Executar resumos e rotinas estrategicas com chamadas assincronas mais seguras.",
+    "Anunciar deploys com texto coerente com o release atual em producao."
   ],
   "changed_files": [
     "bot.py",
+    "conversation_handlers.py",
+    "event_ingestion.py",
+    "jobs.py",
+    "llm_utils.py",
+    "memory_store.py",
+    "routing.py",
+    "runtime.py",
     ".env.example"
   ]
 }
