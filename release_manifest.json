@@ -1,28 +1,21 @@
 {
   "sha": "",
-  "subject": "Refactor bot runtime and stabilize async handlers",
+  "subject": "Fix: atualizar anúncio de deploy com acentuação e hash coerente",
   "changes": [
-    "O fluxo principal do bot foi modularizado com handlers para runtime, roteamento, ingestao de eventos e conversas.",
-    "As respostas por mencao e as rotinas principais passaram a rodar chamadas de IA fora do loop principal do Discord."
+    "O anúncio de deploy passou a usar texto atualizado, com acentuação correta e mensagem mais fiel ao release atual.",
+    "Quando a plataforma não entrega o SHA do commit, o Zito agora monta a versão do deploy sem inventar um hash falso."
   ],
   "fixes": [
-    "Corrigido o anuncio de deploy para nao reaproveitar texto antigo do release manifest em deploys mais novos.",
-    "Reduzido o risco de heartbeat bloqueado quando a IA demora a responder no Discord."
+    "Corrigido o anúncio desatualizado que reaproveitava um manifesto antigo como se fosse o release atual.",
+    "Corrigida a exibição de `Hash: runtime`, que passava uma versão falsa no Discord."
   ],
   "capabilities": [
-    "Responder por mencao com um handler mais estavel e menos acoplado ao bot principal.",
-    "Executar resumos e rotinas estrategicas com chamadas assincronas mais seguras.",
-    "Anunciar deploys com texto coerente com o release atual em producao."
+    "Anunciar deploys com português correto e resumo mais confiável do que realmente mudou.",
+    "Distinguir melhor reinício de instância de um deploy novo, mesmo em ambientes sem `.git`.",
+    "Comunicar o estado do release com mais clareza para a equipe no Discord."
   ],
   "changed_files": [
-    "bot.py",
-    "conversation_handlers.py",
-    "event_ingestion.py",
-    "jobs.py",
-    "llm_utils.py",
-    "memory_store.py",
-    "routing.py",
     "runtime.py",
-    ".env.example"
+    "release_manifest.json"
   ]
 }

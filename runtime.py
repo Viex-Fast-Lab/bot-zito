@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import hashlib
 
 
 def run_git_command(args):
@@ -42,6 +43,24 @@ def load_release_manifest():
             return json.load(f)
     except Exception:
         return {}
+
+
+def build_deploy_identity(metadata):
+    sha = (metadata.get("sha") or "").strip()
+    if sha:
+        return sha
+
+    payload = {
+        "subject": metadata.get("subject") or "",
+        "changes": metadata.get("changes") or [],
+        "fixes": metadata.get("fixes") or [],
+        "capabilities": metadata.get("capabilities") or [],
+        "changed_files": metadata.get("changed_files") or [],
+    }
+    digest = hashlib.sha1(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return f"manifest:{digest}"
 
 
 def get_deploy_metadata():
@@ -119,16 +138,16 @@ def get_deploy_metadata():
 def summarize_capabilities_from_files(changed_files):
     capability_map = {
         "bot.py": "automatizar melhor comportamentos e rotinas no Discord",
-        "memory_store.py": "guardar memoria persistente de mensagens, analises e reunioes",
-        "fireflies_client.py": "ler reunioes do Fireflies e transformar em contexto operacional",
-        "strategic_intelligence.py": "sugerir agentes e automacoes com visao estrategica",
-        "notion_client.py": "cruzar contexto com o Notion e apoiar criacao de tarefas",
+        "memory_store.py": "guardar memória persistente de mensagens, análises e reuniões",
+        "fireflies_client.py": "ler reuniões do Fireflies e transformar em contexto operacional",
+        "strategic_intelligence.py": "sugerir agentes e automações com visão estratégica",
+        "notion_client.py": "cruzar contexto com o Notion e apoiar criação de tarefas",
         "search_github.py": "operar tarefas e sprints vindas do GitHub",
-        "gemini_logic.py": "usar contexto e ferramentas com mais inteligencia operacional",
+        "gemini_logic.py": "usar contexto e ferramentas com mais inteligência operacional",
         "event_ingestion.py": "registrar eventos de Discord de forma mais organizada",
         "routing.py": "rotear mensagens e gatilhos com menos acoplamento",
-        "jobs.py": "executar respostas e jobs reutilizaveis com menos duplicacao",
-        "runtime.py": "gerenciar deploy e resolucao de canais com mais estabilidade",
+        "jobs.py": "executar respostas e jobs reutilizáveis com menos duplicação",
+        "runtime.py": "gerenciar deploy e resolução de canais com mais estabilidade",
     }
     capabilities = []
     for path in changed_files:
@@ -180,18 +199,21 @@ def build_deploy_announcement(last_hash: str, git_hash: str):
     if not changes and subjects:
         changes = subjects[:3]
     if not changes:
-        changes = ["Nova versao publicada na VPS com atualizacoes internas do Zito."]
+        changes = ["Nova versão publicada na VPS com atualizações internas do Zito."]
     if not fixes:
-        fixes = ["Sem correcoes explicitas registradas neste deploy."]
+        fixes = ["Sem correções explícitas registradas neste deploy."]
     if not capabilities:
         capabilities = [
-            "evoluir comportamentos e rotinas operacionais ja existentes",
-            "rodar rotinas automaticas e memoria operacional com mais estabilidade",
+            "evoluir comportamentos e rotinas operacionais já existentes",
+            "rodar rotinas automáticas e memória operacional com mais estabilidade",
         ]
+
+    display_hash = (git_hash or metadata.get("sha") or "").strip()
+    hash_line = f"Hash: `{display_hash[:7]}`" if display_hash else "Hash: `n/d`"
 
     return "\n".join(
         [
-            "Deploy do Zito concluido.",
+            "Deploy do Zito concluído.",
             "",
             "**O que mudou**",
             *[f"- {item}" for item in changes[:4]],
@@ -202,14 +224,14 @@ def build_deploy_announcement(last_hash: str, git_hash: str):
             "**Agora estou apto a fazer melhor**",
             *[f"- {item}" for item in capabilities[:5]],
             "",
-            f"Hash: `{(git_hash or metadata.get('sha') or 'desconhecido')[:7]}`",
+            hash_line,
         ]
     )[:1900]
 
 
 async def announce_new_deploy(bot, announce_channel_id: int, hash_file: str = "last_commit.txt"):
     deploy_metadata = get_deploy_metadata()
-    deploy_git_hash = deploy_metadata.get("sha") or "runtime"
+    deploy_git_hash = build_deploy_identity(deploy_metadata)
     deploy_last_hash = load_last_deploy_hash(hash_file)
     if deploy_git_hash == deploy_last_hash:
         return
